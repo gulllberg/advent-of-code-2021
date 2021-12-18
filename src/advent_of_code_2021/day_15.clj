@@ -67,68 +67,46 @@
   (let [c (first path)]
     (= c end-pos)))
 
-(defn get-new-paths
-  [risk-level-state paths end-pos]
-  (reduce (fn [new-paths path]
-            (let [c (first path)
-                  neighbours (get-neighbours risk-level-state c)]
-              (reduce (fn [new-paths c]
-                        (if (or (path-finished? path end-pos)
-                                (seq-contains? path c))
-                          new-paths
-                          (conj new-paths (conj path c))))
-                      new-paths
-                      neighbours)))
-          #{}
-          paths))
-
-(defn get-path-up-to-c
-  "Up to and including c"
-  [path c]
-  (drop (index-of path c) path))
-
-(defn get-path-risk-level-up-to-c
-  "Up to and including c"
-  [risk-level-state path c]
-  (let [path-up-to-c (get-path-up-to-c path c)]
-    (get-path-risk-level risk-level-state path-up-to-c)))
-
-(defn has-path-been-beaten?
-  [risk-level-state path optimal-risk-levels]
-  (reduce (fn [_ c]
-            (let [path-score (get-path-risk-level-up-to-c risk-level-state path c)
-                  [optimal-score optimal-path] (get optimal-risk-levels c)]
-              (if (and (>= path-score optimal-score)
-                       (not= (get-path-up-to-c path c) optimal-path))
-                (reduced true)
-                false)))
-          false
-          path))
-
-(defn filter-paths
+(defn get-new-paths-and-visited
   {:test (fn []
-           (is= (filter-paths (create-risk-level-state test-input) #{(list [1 0] [0 0]) (list [0 1] [0 0])} {[0 0] [1 (list [0 0])] [1 0] [2 (list [1 0] [0 0])] [0 1] [2 (list [0 1] [0 0])]})
-                #{(list [1 0] [0 0]) (list [0 1] [0 0])}))}
-  [risk-level-state paths optimal-risk-levels-so-far]
-  (reduce (fn [filtered-paths path]
-            (if (has-path-been-beaten? risk-level-state path optimal-risk-levels-so-far)
-              filtered-paths
-              (conj filtered-paths path)))
-          #{}
-          paths))
+           (is= (get-new-paths-and-visited (create-risk-level-state test-input) #{[0 0]} (list [0 0]))
+                [[(list [1 0] [0 0]) (list [0 1] [0 0])] #{[0 0] [1 0] [0 1]}]))}
+  [risk-level-state visited path]
+  (let [c (first path)
+        neighbours (get-neighbours risk-level-state c)]
+    (reduce (fn [[new-paths new-visited] c]
+              (if (contains? new-visited c)
+                [new-paths new-visited]
+                [(conj new-paths (conj path c)) (conj new-visited c)]))
+            [[] visited]
+            neighbours)))
 
-(defn get-new-optimal-risk-levels
-  [risk-level-state paths optimal-risk-levels-so-far]
-  (reduce (fn [optimal-risk-levels path]
-            (let [c (first path)
-                  path-risk-level (get-path-risk-level risk-level-state path)]
-              (if (and (contains? optimal-risk-levels c)
-                       (>= path-risk-level (first (get optimal-risk-levels c))))
-                optimal-risk-levels
-                (assoc optimal-risk-levels c [path-risk-level path]))))
-          optimal-risk-levels-so-far
-          paths))
+;; https://stackoverflow.com/questions/8641305/find-index-of-an-element-matching-a-predicate-in-clojure/8642069
+(defn find-first-index
+  {:test (fn []
+           (is= (find-first-index pos? [-1 0 99 100 101]) 2)
+           (is= (find-first-index pos? [-1 -2 -3]) 3))}
+  [pred coll]
+  (or (first (keep-indexed #(when (pred %2) %1) coll)) (count coll)))
 
+(defn insert-at-index
+  {:test (fn []
+           (is= (insert-at-index (list 1 2 3 4 5) 3 6) (list 1 2 3 6 4 5)))}
+  [coll i x]
+  (concat (take i coll) (list x) (drop i coll)))
+
+(defn insert-paths-into-sorted-list
+  [risk-level-state sorted-paths new-paths]
+  (reduce (fn [sorted-paths path]
+            (let [path-risk-level (get-path-risk-level risk-level-state path)
+                  index-to-insert (if (empty? sorted-paths)
+                                    0
+                                    (find-first-index (fn [path]
+                                                        (< path-risk-level (get-path-risk-level risk-level-state path)))
+                                                      sorted-paths))]
+              (insert-at-index sorted-paths index-to-insert path)))
+          sorted-paths
+          new-paths))
 
 (defn get-safest-route-risk-level
   {:test (fn []
@@ -139,18 +117,17 @@
         start-pos [0 0]
         start-pos-risk-level (get risk-level-state start-pos)
         end-pos (if use-big-state (get-big-end-pos input) [(dec (count (clojure.string/split-lines input))) (dec (count (first (clojure.string/split-lines input))))])]
-    (loop [paths #{(list start-pos)}
-           optimal-risk-levels-so-far {start-pos [start-pos-risk-level (list start-pos)]}
+    (loop [paths (list (list start-pos))
+           visited #{start-pos}
            i 1]
-      (println i (count paths))
-      (if-not (some (fn [path]
-                      (not (path-finished? path end-pos)))
-                    paths)
-        ;; start-pos does not count towards total risk level, but is included in path
-        (- (get-path-risk-level risk-level-state (first paths)) start-pos-risk-level)
-        (let [new-paths (get-new-paths risk-level-state paths end-pos)
-              new-optimal-risk-levels (get-new-optimal-risk-levels risk-level-state new-paths optimal-risk-levels-so-far)]
-          (recur (filter-paths risk-level-state new-paths new-optimal-risk-levels) new-optimal-risk-levels (inc i)))))))
+      (when (= 0 (mod i 100))
+        (println i (count paths)))
+      (let [path (first paths)]
+        (if (path-finished? path end-pos)
+          (- (get-path-risk-level risk-level-state path) start-pos-risk-level)
+          ;; get new candidate paths and insert them sorted into paths
+          (let [[new-paths new-visited] (get-new-paths-and-visited risk-level-state visited path)]
+            (recur (insert-paths-into-sorted-list risk-level-state (rest paths) new-paths) new-visited (inc i))))))))
 
 (defn solve-a
   []
@@ -158,8 +135,9 @@
 
 (comment
   (time (solve-a))
-  ; Elapsed time: 3993.875522 msecs" (old way)
-  ; Elapsed time: ~40000 msecs" (new way)
+  ; Elapsed time: 3993.875522 msecs" (1)
+  ; Elapsed time: ~40000 msecs" (2)
+  ; "Elapsed time: 20010.912602 msecs" (3)
   ; 755
   )
 
@@ -169,6 +147,10 @@
 
 (comment
   (time (solve-b))
-  ; too slow... even when pruning all beaten paths
-  ;
+  ; "Elapsed time: 3.2201793502699E7 msecs" (lol, only 9 hours)
+  ; 3016
+  ; 1. Explored paths breadth first, and when getting to an already visited node stopped if the old path was faster. Resulted in a lot of active paths since if a new path was faster the old one was still allowed to continue. Solved part a pretty well.
+  ; 2. Like 1, but removed the old path if a new was faster. But doing so was also very slow.
+  ; 3. Only take the shortest current path and continue. Guaranteed that when arriving at a node for the first time it is the optimal path.
+  ; Saving entire paths (and maybe the big lookup table for risk levels) is probably what makes this so slow in all versions...
   )
