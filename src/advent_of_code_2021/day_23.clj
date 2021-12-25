@@ -70,7 +70,8 @@
            (is= (get-valid-to-positions {:hall-central-left :A :B (list :A) :A (list :A)} :hall-central-left) [:A])
            (is= (get-valid-to-positions {:hall-central-left :A :B (list :A) :A (list :A :B)} :hall-central-left) [])
            (is= (get-valid-to-positions {:hall-left-2 :A :hall-central-right :A :A (list :A :B)} :A) [:hall-left-1 :hall-central-left :hall-central])
-           (is= (get-valid-to-positions {:hall-left-2 :A :hall-central-right :A :A (list :A)} :A) []))}
+           (is= (get-valid-to-positions {:hall-left-2 :A :hall-central-right :A :A (list :A)} :A) [])
+           (is= (get-valid-to-positions (create-state input) :A) [:hall-left-1 :hall-left-2 :hall-central-left :hall-central :hall-central-right :hall-right-1 :hall-right-2]))}
   [state from-position]
 
   (let [amphipod (get-amphipod state from-position)]
@@ -106,7 +107,7 @@
                              (when (and (can-enter-burrow? state :D amphipod) (not (:hall-right-1 state))) :D)]
 
               :A (if (can-leave-burrow? state :A) [(when-not (:hall-left-1 state) :hall-left-1)
-                                                   (when-not (or (:hall-left-1 state) :hall-left-2) :hall-left-2)
+                                                   (when-not (or (:hall-left-1 state) (:hall-left-2 state)) :hall-left-2)
                                                    (when-not (:hall-central-left state) :hall-central-left)
                                                    (when-not (or (:hall-central-left state) (:hall-central state)) :hall-central)
                                                    (when-not (or (:hall-central-left state) (:hall-central state) (:hall-central-right state)) :hall-central-right)
@@ -230,36 +231,36 @@
           [:A :B :C :D :hall-left-1 :hall-left-2 :hall-central-left :hall-central :hall-central-right :hall-right-1 :hall-right-2]))
 
 (defn find-solutions
-  ; Slow to runs, but green. Found 872 solutions (with different costs)
-  ;{:test (fn []
-  ;         (is= (->> test-input
-  ;                   (create-state)
-  ;                   (find-solutions)
-  ;                   (map :cost)
-  ;                   (apply min))
-  ;              44169))}
+  {:test (fn []
+           (is= (->> test-input
+                     (create-state)
+                     (find-solutions)
+                     (map :cost)
+                     (apply min))
+                44169))}
   [state]
   (loop [possible-solutions #{{:state state :cost 0}}
          finished-solutions #{}]
     (println (count possible-solutions) (count finished-solutions))
     (if (= 0 (count possible-solutions))
       finished-solutions
-      (let [solution-to-continue (first possible-solutions)
-            state (:state solution-to-continue)
-            cost (:cost solution-to-continue)
-            [new-possible new-finished] (reduce (fn [[possible finished] from-position]
-                                                  (reduce (fn [[possible finished] to-position]
-                                                            (let [move-cost (get-cost state from-position to-position)
-                                                                  new-state (move state from-position to-position)]
-                                                              (if (finished? new-state)
-                                                                [possible (conj finished {:state new-state :cost (+ cost move-cost)})]
-                                                                [(conj possible {:state new-state :cost (+ cost move-cost)}) finished])))
-                                                          [possible finished]
-                                                          (get-valid-to-positions state from-position)))
-                                                [#{} #{}]
-                                                (get-from-position-candidates state))]
-        (recur (clojure.set/union (disj possible-solutions solution-to-continue) new-possible)
-               (clojure.set/union finished-solutions new-finished))))))
+      (let [[new-possible new-finished] (reduce (fn [[possible finished] solution-to-continue]
+                                                  (let [state (:state solution-to-continue)
+                                                        cost (:cost solution-to-continue)]
+                                                    (reduce (fn [[possible finished] from-position]
+                                                              (reduce (fn [[possible finished] to-position]
+                                                                        (let [move-cost (get-cost state from-position to-position)
+                                                                              new-state (move state from-position to-position)]
+                                                                          (if (finished? new-state)
+                                                                            [possible (conj finished {:state new-state :cost (+ cost move-cost)})]
+                                                                            [(conj possible {:state new-state :cost (+ cost move-cost)}) finished])))
+                                                                      [possible finished]
+                                                                      (get-valid-to-positions state from-position)))
+                                                            [possible finished]
+                                                            (get-from-position-candidates state))))
+                                                [#{} finished-solutions]
+                                                possible-solutions)]
+        (recur new-possible new-finished)))))
 
 (defn solve-b
   []
@@ -270,6 +271,41 @@
        (apply min)))
 
 (comment
-  (solve-b)
-  ; Does not find any solution...
+  (time (solve-b))
+  ; "Elapsed time: 4450.787652 msecs"
+  ; 50492
+
+  ; Solution moves
+  ; [:C :hall-right-2]
+  ; [:B :hall-right-1]
+  ; [:C :hall-left-2]
+  ; [:C :hall-central-right]
+  ; [:C :hall-left-1]
+  ; [:B :hall-central]
+  ; [:hall-central :C]
+  ; [:A :hall-central]
+  ; [:hall-central :C]
+  ; [:B :hall-central-left]
+  ; [:B :hall-central]
+  ; [:hall-central-left :B]
+  ; [:hall-left-1 :B]
+  ; [:hall-left-2 :B]
+  ; [:A :hall-left-2]
+  ; [:A :hall-left-1]
+  ; [:A :hall-central-left]
+  ; [:hall-central-left :B]
+  ; [:hall-central :A]
+  ; [:hall-central-right :A]
+  ; [:D :hall-central-left]
+  ; [:hall-central-left :A]
+  ; [:D :hall-central-right]
+  ; [:hall-central-right :A]
+  ; [:D :hall-central]
+  ; [:hall-central :C]
+  ; [:D :hall-central-right]
+  ; [:hall-right-1 :D]
+  ; [:hall-central-right :C]
+  ; [:hall-left-1 :D]
+  ; [:hall-left-2 :D]
+  ; [:hall-right-2 :D]
   )
